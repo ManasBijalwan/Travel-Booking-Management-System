@@ -1,12 +1,7 @@
 const oracledb = require("oracledb");
 
-// Use THIN mode — no Oracle Client installation needed
-oracledb.initOracleClient(); // remove this line if using Thin mode exclusively
-
-// Output format: objects instead of arrays
+oracledb.initOracleClient();
 oracledb.outFormat = oracledb.OUT_FORMAT_OBJECT;
-
-// Auto-commit OFF globally — we manage commits inside PL/SQL procedures
 oracledb.autoCommit = false;
 
 let pool;
@@ -23,12 +18,6 @@ async function initPool() {
   console.log("Oracle connection pool created.");
 }
 
-/**
- * Execute a SQL query or PL/SQL block.
- * @param {string} sql
- * @param {object|Array} binds  - bind parameters
- * @param {object} opts         - extra oracledb execute options
- */
 async function execute(sql, binds = {}, opts = {}) {
   let conn;
   try {
@@ -43,19 +32,11 @@ async function execute(sql, binds = {}, opts = {}) {
   }
 }
 
-/**
- * Execute with an explicit connection — used when you need to read
- * a SYS_REFCURSOR OUT parameter returned by a stored procedure.
- */
 async function executeWithConn(sql, binds = {}, opts = {}) {
   const conn = await pool.getConnection();
   return { conn, execute: () => conn.execute(sql, binds, opts) };
 }
 
-/**
- * Read all rows from a SYS_REFCURSOR returned as an OUT bind.
- * Caller must close the cursor and connection after.
- */
 async function fetchCursor(cursor) {
   const rows = [];
   let row;
