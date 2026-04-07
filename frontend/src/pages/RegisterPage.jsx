@@ -1,24 +1,45 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
 function RegisterPage() {
   const { register } = useAuth();
   const navigate = useNavigate();
+
+  // No user_id — the DB auto-generates it from the sequence
   const [form, setForm] = useState({
-    user_id: "",
     full_name: "",
     email: "",
     phone: "",
     password: "",
+    confirmPassword: "",
   });
   const [error, setError] = useState("");
+
+  const handleChange = (e) => {
+    setForm({ ...form, [e.target.name]: e.target.value });
+  };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
     setError("");
+
+    if (form.password !== form.confirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+    if (form.password.length < 6) {
+      setError("Password must be at least 6 characters.");
+      return;
+    }
+
     try {
-      await register(form);
+      await register({
+        full_name: form.full_name,
+        email:     form.email,
+        phone:     form.phone,
+        password:  form.password,
+      });
       navigate("/search");
     } catch (submitError) {
       setError(submitError.response?.data?.error || submitError.message);
@@ -30,37 +51,52 @@ function RegisterPage() {
       <form className="auth-card" onSubmit={handleSubmit}>
         <p className="eyebrow">Create Account</p>
         <h1>Create your traveler account</h1>
+        <p className="helper-text">
+          Already have an account? <Link to="/login/user">Sign in</Link>
+        </p>
 
         {error && <p className="error-text">{error}</p>}
 
         <input
-          type="text"
-          placeholder="User ID (alphanumeric)"
-          value={form.user_id}
-          onChange={(e) => setForm({ ...form, user_id: e.target.value })}
-        />
-        <input
+          name="full_name"
           placeholder="Full Name"
           value={form.full_name}
-          onChange={(e) => setForm({ ...form, full_name: e.target.value })}
+          onChange={handleChange}
+          required
         />
         <input
+          name="email"
           type="email"
-          placeholder="Email"
+          placeholder="Email address"
           value={form.email}
-          onChange={(e) => setForm({ ...form, email: e.target.value })}
+          autoComplete="email"
+          onChange={handleChange}
+          required
         />
         <input
+          name="phone"
           type="tel"
-          placeholder="Phone"
+          placeholder="Phone number (optional)"
           value={form.phone}
-          onChange={(e) => setForm({ ...form, phone: e.target.value })}
+          onChange={handleChange}
         />
         <input
+          name="password"
           type="password"
-          placeholder="Password"
+          placeholder="Password (min 6 characters)"
           value={form.password}
-          onChange={(e) => setForm({ ...form, password: e.target.value })}
+          autoComplete="new-password"
+          onChange={handleChange}
+          required
+        />
+        <input
+          name="confirmPassword"
+          type="password"
+          placeholder="Confirm password"
+          value={form.confirmPassword}
+          autoComplete="new-password"
+          onChange={handleChange}
+          required
         />
 
         <button type="submit" className="primary-button">

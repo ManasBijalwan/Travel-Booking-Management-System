@@ -313,6 +313,17 @@ button {
   color: white;
 }
 
+.seat.booked {
+  background: #d1d5db;
+  color: #9ca3af;
+  cursor: not-allowed;
+  border-color: #d1d5db;
+  opacity: 0.7;
+}
+.seat.booked:hover {
+  transform: none;
+}
+
 .status-badge.confirmed {
   background: rgba(15, 118, 110, 0.12);
   color: var(--primary-dark);

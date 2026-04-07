@@ -5,7 +5,7 @@ import { useAuth } from "../context/AuthContext";
 const roleContent = {
   user: {
     title: "User Login",
-    subtitle: "Sign in first, then search and book train, bus, or flight tickets.",
+    subtitle: "Sign in to search and book train, bus, or flight tickets.",
     successPath: "/search",
   },
   admin: {
@@ -19,7 +19,9 @@ function LoginPage({ role = "user" }) {
   const { login, user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [form, setForm] = useState({ user_id: "", password: "" });
+
+  // email replaces user_id as the login identifier
+  const [form, setForm] = useState({ email: "", password: "" });
   const [error, setError] = useState("");
 
   const content = roleContent[role];
@@ -28,6 +30,7 @@ function LoginPage({ role = "user" }) {
     location.state?.from?.pathname ||
     content.successPath;
 
+  // Already logged in with the right role → redirect
   if (user?.role === role) {
     return <Navigate to={content.successPath} replace />;
   }
@@ -36,7 +39,7 @@ function LoginPage({ role = "user" }) {
     event.preventDefault();
     setError("");
     try {
-      await login({ ...form, expectedRole: role });
+      await login({ email: form.email, password: form.password, expectedRole: role });
       navigate(from, { replace: true });
     } catch (submitError) {
       setError(submitError.response?.data?.error || submitError.message);
@@ -55,15 +58,17 @@ function LoginPage({ role = "user" }) {
         {error && <p className="error-text">{error}</p>}
 
         <input
-          type="text"
-          placeholder="User ID"
-          value={form.user_id}
-          onChange={(e) => setForm({ ...form, user_id: e.target.value })}
+          type="email"
+          placeholder="Email address"
+          value={form.email}
+          autoComplete="email"
+          onChange={(e) => setForm({ ...form, email: e.target.value })}
         />
         <input
           type="password"
           placeholder="Password"
           value={form.password}
+          autoComplete="current-password"
           onChange={(e) => setForm({ ...form, password: e.target.value })}
         />
 
@@ -73,11 +78,11 @@ function LoginPage({ role = "user" }) {
 
         {role === "user" ? (
           <p className="helper-text">
-            New traveler? <Link to="/register">Create a user account</Link>
+            New here? <Link to="/register">Create a free account</Link>
           </p>
         ) : (
           <p className="helper-text">
-            Need customer access? <Link to="/login/user">Go to user login</Link>
+            Not an admin? <Link to="/login/user">Go to user login</Link>
           </p>
         )}
       </form>

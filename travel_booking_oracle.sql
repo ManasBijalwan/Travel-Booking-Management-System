@@ -749,6 +749,39 @@ EXCEPTION
 END proc_remove_passenger;
 /
 
+CREATE OR REPLACE PROCEDURE proc_create_booking (
+    p_user_id               IN  BOOKING.user_id%TYPE,
+    p_schedule_id           IN  BOOKING.schedule_id%TYPE,
+    p_boarding_location_id  IN  BOOKING.boarding_location_id%TYPE,
+    p_dropping_location_id  IN  BOOKING.dropping_location_id%TYPE,
+    p_booking_id            OUT BOOKING.booking_id%TYPE
+) AS
+    v_seats NUMBER;
+BEGIN
+    SELECT seats_remaining INTO v_seats
+    FROM SCHEDULE WHERE schedule_id = p_schedule_id;
+
+    IF v_seats <= 0 THEN
+        RAISE_APPLICATION_ERROR(-20110, 'No seats remaining on this schedule.');
+    END IF;
+    INSERT INTO BOOKING (
+        user_id, schedule_id, boarding_location_id, dropping_location_id,
+        booking_status, total_amount
+    ) VALUES (
+        p_user_id, p_schedule_id, p_boarding_location_id, p_dropping_location_id,
+        'pending', 0
+    ) RETURNING booking_id INTO p_booking_id;
+
+    COMMIT;
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+        RAISE_APPLICATION_ERROR(-20111, 'Schedule not found.');
+    WHEN OTHERS THEN
+        ROLLBACK;
+        RAISE;
+END proc_create_booking;
+/
+
 -- functions
 CREATE OR REPLACE FUNCTION fn_user_booking_count (
     p_user_id IN NUMBER
