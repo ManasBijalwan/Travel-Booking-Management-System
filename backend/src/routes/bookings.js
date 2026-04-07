@@ -1,6 +1,6 @@
 const express = require("express");
 const oracledb = require("oracledb");
-const { execute, getConnection } = require("../db");
+const { execute, getConnection, fetchCursor } = require("../db");
 const { authenticate, requireUser } = require("../middleware/auth");
 
 const router = express.Router();
@@ -24,8 +24,6 @@ function formatCurrency(amount) {
 }
 
 function oraError(err) {
-  // Extract the human-readable part from Oracle application errors
-  // e.g. "ORA-20110: No seats remaining..." → "No seats remaining..."
   if (err.message && err.message.includes("ORA-20")) {
     const match = err.message.match(/ORA-\d+: (.+?)(\n|$)/);
     if (match) return match[1].trim();
@@ -33,33 +31,8 @@ function oraError(err) {
   return null;
 }
 
-function mapBookingRow(row, passengers = [], seats = [], paymentStatus = "Pending") {
-  return {
-    id: row.BOOKING_ID,
-    booking_id: row.BOOKING_ID,
-    pnr: row.PNR_NUMBER,
-    status: row.BOOKING_STATUS,
-    bookedAt: row.BOOKING_DATE,
-    totalAmount: Number(row.TOTAL_AMOUNT),
-    totalAmountLabel: formatCurrency(row.TOTAL_AMOUNT),
-    paymentStatus,
-    passengers,
-    selectedSeats: seats,
-    travel: {
-      name: row.ROUTE_NAME,
-      type: row.MODE_NAME,
-      origin: row.BOARDING_LOCATION,
-      destination: row.DROPPING_LOCATION,
-      departureDate: toDatePart(row.DEPARTURE_DATETIME),
-      departureTime: toTimePart(row.DEPARTURE_DATETIME),
-      arrivalTime: toTimePart(row.ARRIVAL_DATETIME),
-    },
-  };
-}
-
 // ─── POST /api/bookings ───────────────────────────────────────────────────────
-// Flow: proc_create_booking → INSERT PASSENGER + proc_add_passenger (×N)
-//       → proc_process_payment (confirms booking + records payment)
+// Calls: proc_create_booking → proc_add_passenger (×N) → proc_process_payment
 router.post("/", authenticate, requireUser, async (req, res) => {
   const {
     userId,
@@ -83,7 +56,7 @@ router.post("/", authenticate, requireUser, async (req, res) => {
   try {
     conn = await getConnection();
 
-    // ── Step 1: Create booking (status = pending, amount = 0) ─────────────────
+    // ── Step 1: Create booking (pending, amount = 0) ──────────────────────
     const createResult = await conn.execute(
       `BEGIN proc_create_booking(:userId, :schedId, :boardLoc, :dropLoc, :bookId); END;`,
       {
@@ -97,14 +70,14 @@ router.post("/", authenticate, requireUser, async (req, res) => {
     );
     const bookingId = createResult.outBinds.bookId;
 
-    // ── Step 2: Insert each passenger and link to booking ─────────────────────
-    const farePerSeat = Number(totalAmount) / passengers.length;
+    // ── Step 2: For each passenger — insert then proc_add_passenger ────────
+    const farePerSeat = Math.round((Number(totalAmount) / passengers.length) * 100) / 100;
 
     for (let i = 0; i < passengers.length; i++) {
-      const p = passengers[i];
+      const p   = passengers[i];
       const seat = selectedSeats[i];
 
-      // Insert passenger record
+      // Insert passenger row, get back passenger_id
       const passResult = await conn.execute(
         `INSERT INTO PASSENGER
            (user_id, passenger_name, age, gender, id_proof_type, id_proof_number)
@@ -115,7 +88,7 @@ router.post("/", authenticate, requireUser, async (req, res) => {
           name:   p.passenger_name,
           age:    Number(p.age),
           gender: (p.gender || "Male").toLowerCase(),
-          idType: p.id_proof_type || "Self Declared",
+          idType: p.id_proof_type  || "Self Declared",
           idNum:  p.id_proof_number || "",
           pid:    { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
         },
@@ -123,20 +96,20 @@ router.post("/", authenticate, requireUser, async (req, res) => {
       );
       const passengerId = passResult.outBinds.pid[0];
 
-      // Link passenger to booking (also decrements seats_remaining)
+      // Link to booking — also decrements seats_remaining in SCHEDULE
       await conn.execute(
         `BEGIN proc_add_passenger(:bookId, :passId, :seat, :fare); END;`,
         {
           bookId: bookingId,
           passId: passengerId,
           seat,
-          fare:   Math.round(farePerSeat * 100) / 100,
+          fare:   farePerSeat,
         },
         { outFormat: oracledb.OUT_FORMAT_OBJECT }
       );
     }
 
-    // ── Step 3: Process payment → also confirms booking ───────────────────────
+    // ── Step 3: Process payment — also sets booking_status = 'confirmed' ──
     const payResult = await conn.execute(
       `BEGIN proc_process_payment(:bookId, :method, :txRef); END;`,
       {
@@ -150,7 +123,16 @@ router.post("/", authenticate, requireUser, async (req, res) => {
 
     await conn.commit();
 
-    // ── Step 4: Fetch full booking view to return ─────────────────────────────
+    // ── Step 4: Fetch booking summary using fn_user_booking_count ──────────
+    // (demonstrates function usage — gives total booking count for the user)
+    const countRes = await conn.execute(
+      `SELECT fn_user_booking_count(:uid) AS total_bookings FROM DUAL`,
+      { uid: Number(userId) },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    const totalBookings = countRes.rows[0]?.TOTAL_BOOKINGS;
+
+    // Fetch the created booking for response
     const bookQuery = await conn.execute(
       `SELECT b.booking_id, b.pnr_number, b.booking_status,
               b.total_amount, b.booking_date,
@@ -168,12 +150,30 @@ router.post("/", authenticate, requireUser, async (req, res) => {
       { id: bookingId },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
-
     const row = bookQuery.rows[0];
-    const booking = mapBookingRow(row, passengers, selectedSeats, "Paid");
-    booking.transactionRef = transactionRef;
 
-    return res.status(201).json(booking);
+    return res.status(201).json({
+      id:               bookingId,
+      booking_id:       bookingId,
+      pnr:              row.PNR_NUMBER,
+      status:           row.BOOKING_STATUS,
+      totalAmount:      Number(row.TOTAL_AMOUNT),
+      totalAmountLabel: formatCurrency(row.TOTAL_AMOUNT),
+      paymentStatus:    "Paid",
+      transactionRef,
+      passengers,
+      selectedSeats,
+      userTotalBookings: totalBookings,
+      travel: {
+        name:          row.ROUTE_NAME,
+        type:          row.MODE_NAME,
+        origin:        row.BOARDING_LOCATION,
+        destination:   row.DROPPING_LOCATION,
+        departureDate: toDatePart(row.DEPARTURE_DATETIME),
+        departureTime: toTimePart(row.DEPARTURE_DATETIME),
+        arrivalTime:   toTimePart(row.ARRIVAL_DATETIME),
+      },
+    });
   } catch (err) {
     if (conn) try { await conn.rollback(); } catch (_) {}
     console.error("Create booking error:", err);
@@ -185,46 +185,46 @@ router.post("/", authenticate, requireUser, async (req, res) => {
 });
 
 // ─── GET /api/bookings/user/:userId ──────────────────────────────────────────
+// Uses proc_get_user_bookings (SYS_REFCURSOR) for the history list
 router.get("/user/:userId", authenticate, async (req, res) => {
-  // Users can only see their own; admins can see anyone's
   if (req.user.role !== "admin" && String(req.user.id) !== req.params.userId) {
     return res.status(403).json({ error: "Access denied." });
   }
 
+  const uid = Number(req.params.userId);
+  let conn;
   try {
-    const bookingsResult = await execute(
-      `SELECT b.booking_id, b.pnr_number, b.booking_status,
-              b.total_amount, b.booking_date,
-              s.departure_datetime, s.arrival_datetime,
-              r.route_name, tm.mode_name,
-              l1.location_name AS boarding_location,
-              l2.location_name AS dropping_location
-         FROM BOOKING b
-         JOIN SCHEDULE s     ON b.schedule_id          = s.schedule_id
-         JOIN ROUTE r        ON s.route_id             = r.route_id
-         JOIN TRAVEL_MODE tm ON r.mode_id              = tm.mode_id
-         JOIN LOCATION l1    ON b.boarding_location_id = l1.location_id
-         JOIN LOCATION l2    ON b.dropping_location_id = l2.location_id
-        WHERE b.user_id = :uid
-        ORDER BY b.booking_date DESC`,
-      { uid: Number(req.params.userId) }
-    );
+    conn = await getConnection();
 
+    // ── Call proc_get_user_bookings — returns SYS_REFCURSOR ───────────────
+    const procResult = await conn.execute(
+      `BEGIN proc_get_user_bookings(:uid, :cur); END;`,
+      {
+        uid: uid,
+        cur: { dir: oracledb.BIND_OUT, type: oracledb.CURSOR },
+      },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    const bookingRows = await fetchCursor(procResult.outBinds.cur);
+
+    // ── For each booking, fetch passengers + seats + payment status ────────
     const bookings = await Promise.all(
-      bookingsResult.rows.map(async (row) => {
+      bookingRows.map(async (row) => {
         const [passResult, payResult] = await Promise.all([
-          execute(
-            `SELECT p.passenger_name, p.age, p.gender, p.id_proof_number,
-                    bp.seat_number
+          conn.execute(
+            `SELECT p.passenger_name, p.age, p.gender,
+                    p.id_proof_number, bp.seat_number
                FROM BOOKING_PASSENGER bp
                JOIN PASSENGER p ON bp.passenger_id = p.passenger_id
               WHERE bp.booking_id = :bid`,
-            { bid: row.BOOKING_ID }
+            { bid: row.BOOKING_ID },
+            { outFormat: oracledb.OUT_FORMAT_OBJECT }
           ),
-          execute(
+          conn.execute(
             `SELECT payment_status FROM PAYMENT
               WHERE booking_id = :bid AND ROWNUM = 1`,
-            { bid: row.BOOKING_ID }
+            { bid: row.BOOKING_ID },
+            { outFormat: oracledb.OUT_FORMAT_OBJECT }
           ),
         ]);
 
@@ -234,10 +234,30 @@ router.get("/user/:userId", authenticate, async (req, res) => {
           gender:          p.GENDER,
           id_proof_number: p.ID_PROOF_NUMBER,
         }));
-        const seats = passResult.rows.map((p) => p.SEAT_NUMBER);
+        const seats     = passResult.rows.map((p) => p.SEAT_NUMBER);
         const payStatus = payResult.rows[0]?.PAYMENT_STATUS || "Pending";
 
-        return mapBookingRow(row, passengers, seats, payStatus);
+        return {
+          id:               row.BOOKING_ID,
+          booking_id:       row.BOOKING_ID,
+          pnr:              row.PNR_NUMBER,
+          status:           row.BOOKING_STATUS,
+          bookedAt:         row.BOOKING_DATE,
+          totalAmount:      Number(row.TOTAL_AMOUNT),
+          totalAmountLabel: formatCurrency(row.TOTAL_AMOUNT),
+          paymentStatus:    payStatus,
+          passengers,
+          selectedSeats:    seats,
+          travel: {
+            name:          row.ROUTE_NAME,
+            type:          row.MODE_NAME,
+            origin:        row.BOARDING_LOCATION,
+            destination:   row.DROPPING_LOCATION,
+            departureDate: toDatePart(row.DEPARTURE_DATETIME),
+            departureTime: toTimePart(row.DEPARTURE_DATETIME),
+            arrivalTime:   toTimePart(row.ARRIVAL_DATETIME),
+          },
+        };
       })
     );
 
@@ -245,17 +265,19 @@ router.get("/user/:userId", authenticate, async (req, res) => {
   } catch (err) {
     console.error("Get user bookings error:", err);
     return res.status(500).json({ error: "Failed to load bookings." });
+  } finally {
+    if (conn) try { await conn.close(); } catch (_) {}
   }
 });
 
 // ─── PATCH /api/bookings/:id/cancel ──────────────────────────────────────────
+// Uses proc_cancel_booking (handles refund calc + cancellation record)
 router.patch("/:id/cancel", authenticate, async (req, res) => {
   const bookingId = Number(req.params.id);
   let conn;
   try {
     conn = await getConnection();
 
-    // Verify booking exists and check ownership
     const ownResult = await conn.execute(
       `SELECT user_id, booking_status FROM BOOKING WHERE booking_id = :id`,
       { id: bookingId },
@@ -274,7 +296,7 @@ router.patch("/:id/cancel", authenticate, async (req, res) => {
       return res.status(400).json({ error: "Booking is already cancelled." });
     }
 
-    // Call the cancel procedure
+    // ── Call proc_cancel_booking ───────────────────────────────────────────
     const cancelResult = await conn.execute(
       `BEGIN proc_cancel_booking(:bookId, :reason, :refund); END;`,
       {
@@ -287,9 +309,9 @@ router.patch("/:id/cancel", authenticate, async (req, res) => {
     await conn.commit();
 
     return res.json({
-      success: true,
+      success:           true,
       bookingId,
-      refundAmount: cancelResult.outBinds.refund,
+      refundAmount:      cancelResult.outBinds.refund,
       refundAmountLabel: formatCurrency(cancelResult.outBinds.refund),
     });
   } catch (err) {

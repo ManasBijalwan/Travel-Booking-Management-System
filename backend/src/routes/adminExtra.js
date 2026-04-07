@@ -1,6 +1,6 @@
 const express = require("express");
 const oracledb = require("oracledb");
-const { execute } = require("../db");
+const { execute, getConnection } = require("../db");
 const { authenticate, requireAdmin } = require("../middleware/auth");
 
 const router = express.Router();
@@ -128,16 +128,16 @@ router.get("/cancellations", async (req, res) => {
         ORDER BY c.cancellation_date DESC`
     );
     return res.json(result.rows.map((r) => ({
-      id:               r.CANCELLATION_ID,
-      bookingId:        r.BOOKING_ID,
-      cancellationDate: r.CANCELLATION_DATE,
-      refundAmount:     Number(r.REFUND_AMOUNT),
+      id:                r.CANCELLATION_ID,
+      bookingId:         r.BOOKING_ID,
+      cancellationDate:  r.CANCELLATION_DATE,
+      refundAmount:      Number(r.REFUND_AMOUNT),
       refundAmountLabel: formatCurrency(r.REFUND_AMOUNT),
-      reason:           r.CANCELLATION_REASON,
-      refundStatus:     r.REFUND_STATUS,
-      pnr:              r.PNR_NUMBER,
-      travelName:       r.ROUTE_NAME,
-      route:            `${r.ORIGIN_CITY} to ${r.DEST_CITY}`,
+      reason:            r.CANCELLATION_REASON,
+      refundStatus:      r.REFUND_STATUS,
+      pnr:               r.PNR_NUMBER,
+      travelName:        r.ROUTE_NAME,
+      route:             `${r.ORIGIN_CITY} to ${r.DEST_CITY}`,
     })));
   } catch (err) {
     return res.status(500).json({ error: "Failed to load cancellations." });
@@ -145,12 +145,11 @@ router.get("/cancellations", async (req, res) => {
 });
 
 // ─── GET /api/admin/form-options/vehicles ─────────────────────────────────────
-// Provides mode + operator dropdowns for the Vehicles and Operators admin forms
 router.get("/form-options/vehicles", async (req, res) => {
   try {
     const [modes, operators] = await Promise.all([
       execute(`SELECT mode_id, mode_name FROM TRAVEL_MODE ORDER BY mode_id`),
-      execute(`SELECT operator_id, operator_name FROM OPERATOR ORDER BY operator_id`),
+      execute(`SELECT operator_id, operator_name FROM OPERATOR ORDER BY operator_name`),
     ]);
     return res.json({
       modes:     modes.rows.map((r) => ({ value: r.MODE_ID,     label: r.MODE_NAME })),
@@ -162,13 +161,13 @@ router.get("/form-options/vehicles", async (req, res) => {
 });
 
 // ─── GET /api/admin/form-options/routes ───────────────────────────────────────
-// Provides all dropdowns for the Routes admin form
 router.get("/form-options/routes", async (req, res) => {
   try {
     const [modes, locations, operators, vehicles] = await Promise.all([
       execute(`SELECT mode_id, mode_name FROM TRAVEL_MODE ORDER BY mode_id`),
       execute(
-        `SELECT location_id, location_name, city FROM LOCATION ORDER BY city, location_name`
+        `SELECT location_id, location_name, city FROM LOCATION
+          ORDER BY city, location_name`
       ),
       execute(`SELECT operator_id, operator_name FROM OPERATOR ORDER BY operator_name`),
       execute(
@@ -196,6 +195,69 @@ router.get("/form-options/routes", async (req, res) => {
     });
   } catch (err) {
     return res.status(500).json({ error: "Failed to load route form options." });
+  }
+});
+
+// ─── GET /api/admin/analytics ─────────────────────────────────────────────────
+// Uses fn_route_revenue, fn_most_popular_route, fn_user_booking_count
+// This endpoint enriches the dashboard with function-based analytics.
+// Called optionally — dashboard works without it, but adds extra insight.
+router.get("/analytics", async (req, res) => {
+  try {
+    // Most popular route — fn_most_popular_route
+    const popularRes = await execute(
+      `SELECT fn_most_popular_route() AS popular_route FROM DUAL`
+    );
+    const popularRoute = popularRes.rows[0]?.POPULAR_ROUTE || "N/A";
+
+    // Revenue per route — fn_route_revenue for each route
+    const routeRes = await execute(
+      `SELECT route_id, route_name FROM ROUTE ORDER BY route_id`
+    );
+    const revenueByRoute = await Promise.all(
+      routeRes.rows.map(async (r) => {
+        const revRes = await execute(
+          `SELECT fn_route_revenue(:rid) AS revenue FROM DUAL`,
+          { rid: r.ROUTE_ID }
+        );
+        return {
+          routeId:   r.ROUTE_ID,
+          routeName: r.ROUTE_NAME,
+          revenue:   Number(revRes.rows[0]?.REVENUE || 0),
+          revenueLabel: formatCurrency(revRes.rows[0]?.REVENUE || 0),
+        };
+      })
+    );
+
+    // Top 5 users by booking count — fn_user_booking_count
+    const userRes = await execute(
+      `SELECT user_id, full_name FROM USERS WHERE role='user' ORDER BY user_id`
+    );
+    const userStats = await Promise.all(
+      userRes.rows.map(async (u) => {
+        const cntRes = await execute(
+          `SELECT fn_user_booking_count(:uid) AS cnt FROM DUAL`,
+          { uid: u.USER_ID }
+        );
+        return {
+          userId:        u.USER_ID,
+          name:          u.FULL_NAME,
+          bookingCount:  Number(cntRes.rows[0]?.CNT || 0),
+        };
+      })
+    );
+    const topUsers = userStats
+      .sort((a, b) => b.bookingCount - a.bookingCount)
+      .slice(0, 5);
+
+    return res.json({
+      popularRoute,
+      revenueByRoute,
+      topUsers,
+    });
+  } catch (err) {
+    console.error("Analytics error:", err);
+    return res.status(500).json({ error: "Failed to load analytics." });
   }
 });
 
