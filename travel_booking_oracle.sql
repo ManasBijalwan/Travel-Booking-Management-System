@@ -1057,11 +1057,11 @@ VALUES (5, 5,
 
 INSERT INTO USERS (full_name, email, phone, password_hash, role, status)
 VALUES ('Admin User', 'admin@travelbook.com', '9999999999',
-        '$2b$10$PLACEHOLDER_ADMIN_HASH', 'admin', 'active');
+        '$2a$10$ytiCHtbJ.u5DOjFEQZDodexjLGbfVD2YYbvDsf8Lz7JLl545.RsiG', 'admin', 'active');
 
 INSERT INTO USERS (full_name, email, phone, password_hash, role, status)
 VALUES ('Test User', 'user@travelbook.com', '8888888888',
-        '$2b$10$PLACEHOLDER_USER_HASH', 'user', 'active');
+        '$2a$10$wk2BXKuOAgU0360YQjvuH.FxfhpNKsEgpFYzxGRjFm6f7rDKDnx2C', 'user', 'active');
 COMMIT;
 
 
