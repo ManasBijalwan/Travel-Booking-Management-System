@@ -4,8 +4,8 @@ import {
   deleteAdminResource,
   getAdminResource,
   getVehicleFormOptions,
-  upsertAdminResource
-} from "../../services/travelService";
+  upsertAdminResource,
+} from "../../services/adminService";
 
 function AdminVehiclesPage() {
   const [records, setRecords] = useState([]);
@@ -17,15 +17,12 @@ function AdminVehiclesPage() {
     setRecords(result);
   };
 
-  const loadOptions = async () => {
-    const result = await getVehicleFormOptions();
-    setModeOptions(result.modes);
-    setOperatorOptions(result.operators);
-  };
-
   useEffect(() => {
     loadRecords();
-    loadOptions();
+    getVehicleFormOptions().then((opts) => {
+      setModeOptions(opts.modes);
+      setOperatorOptions(opts.operators);
+    });
   }, []);
 
   const fields = useMemo(
@@ -33,9 +30,9 @@ function AdminVehiclesPage() {
       { name: "mode_id", label: "Mode", type: "select", options: modeOptions },
       {
         name: "operator_id",
-        label: "Operator ID",
-        type: "datalist",
-        options: operatorOptions
+        label: "Operator",
+        type: "select",
+        options: operatorOptions,
       },
       { name: "vehicle_number", label: "Vehicle Number" },
       { name: "vehicle_name", label: "Vehicle Name" },
@@ -44,8 +41,11 @@ function AdminVehiclesPage() {
         name: "status",
         label: "Status",
         type: "select",
-        options: ["operational", "non operational"]
-      }
+        options: [
+          { value: "operational", label: "Operational" },
+          { value: "non operational", label: "Non Operational" },
+        ],
+      },
     ],
     [modeOptions, operatorOptions]
   );
@@ -63,7 +63,7 @@ function AdminVehiclesPage() {
   return (
     <AdminResourcePage
       title="Vehicles"
-      description="Add and manage vehicles by schema fields."
+      description="Add and manage vehicles assigned to routes."
       fields={fields}
       records={records}
       onSave={handleSave}

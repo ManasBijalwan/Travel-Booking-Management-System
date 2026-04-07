@@ -1,30 +1,51 @@
 const express = require("express");
 const oracledb = require("oracledb");
-const { execute } = require("../db");
+const { execute, getConnection } = require("../db");
 const { authenticate, requireAdmin } = require("../middleware/auth");
 
 const router = express.Router();
 router.use(authenticate, requireAdmin);
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
 function formatCurrency(n) {
   return `₹${Number(n || 0).toLocaleString("en-IN")}`;
 }
+
 function toTimePart(dt) {
   if (!dt) return "";
   const d = dt instanceof Date ? dt : new Date(dt);
   return d.toTimeString().slice(0, 5);
 }
+
 function toDatePart(dt) {
   if (!dt) return "";
   const d = dt instanceof Date ? dt : new Date(dt);
   return d.toISOString().slice(0, 10);
 }
 
+// The DB CHECK constraint uses: 'station' | 'airport' | 'bus_stop'
+// The frontend sends: 'Railway Station' | 'Airport' | 'Bus Stand'
+const LOCATION_TYPE_TO_DB = {
+  "Railway Station": "station",
+  "Airport":         "airport",
+  "Bus Stand":       "bus_stop",
+  // pass-through if already in DB format
+  "station":  "station",
+  "airport":  "airport",
+  "bus_stop": "bus_stop",
+};
+const LOCATION_TYPE_TO_DISPLAY = {
+  "station":  "Railway Station",
+  "airport":  "Airport",
+  "bus_stop": "Bus Stand",
+};
+
 // ─── GET /api/admin/overview ──────────────────────────────────────────────────
 router.get("/overview", async (req, res) => {
   let conn;
   try {
-    conn = await oracledb.getPool().getConnection();
+    conn = await getConnection();
 
     const dash = await conn.execute(
       `BEGIN proc_admin_dashboard(:u,:b,:conf,:canc,:rev,:sch); END;`,
@@ -93,7 +114,8 @@ router.get("/overview", async (req, res) => {
   }
 });
 
-// ─── Operators ────────────────────────────────────────────────────────────────
+// ─── OPERATORS ────────────────────────────────────────────────────────────────
+
 router.get("/operators", async (req, res) => {
   try {
     const r = await execute(
@@ -103,10 +125,17 @@ router.get("/operators", async (req, res) => {
         ORDER BY o.operator_id`
     );
     return res.json(r.rows.map((row) => ({
-      id: row.ID, operator_name: row.OPERATOR_NAME, mode_id: row.MODE_ID,
-      mode_name: row.MODE_NAME, contact_email: row.CONTACT_EMAIL, contact_phone: row.CONTACT_PHONE,
+      id:             row.ID,
+      operator_name:  row.OPERATOR_NAME,
+      mode_id:        row.MODE_ID,
+      mode_name:      row.MODE_NAME,
+      contact_email:  row.CONTACT_EMAIL,
+      contact_phone:  row.CONTACT_PHONE,
     })));
-  } catch (err) { return res.status(500).json({ error: "Failed." }); }
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "Failed to load operators." });
+  }
 });
 
 router.post("/operators", async (req, res) => {
@@ -115,12 +144,20 @@ router.post("/operators", async (req, res) => {
     const r = await execute(
       `INSERT INTO OPERATOR (operator_name, mode_id, contact_email, contact_phone)
        VALUES (:name, :mid, :email, :phone) RETURNING operator_id INTO :id`,
-      { name: operator_name, mid: Number(mode_id), email: contact_email || null,
-        phone: contact_phone || null, id: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER } },
+      {
+        name:  operator_name,
+        mid:   Number(mode_id),
+        email: contact_email || null,
+        phone: contact_phone || null,
+        id:    { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
+      },
       { autoCommit: true }
     );
     return res.status(201).json({ id: r.outBinds.id[0] });
-  } catch (err) { return res.status(500).json({ error: "Failed to create operator." }); }
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "Failed to create operator." });
+  }
 });
 
 router.put("/operators/:id", async (req, res) => {
@@ -128,73 +165,120 @@ router.put("/operators/:id", async (req, res) => {
   try {
     await execute(
       `UPDATE OPERATOR SET operator_name=:name, mode_id=:mid,
-              contact_email=:email, contact_phone=:phone WHERE operator_id=:id`,
-      { name: operator_name, mid: Number(mode_id), email: contact_email || null,
-        phone: contact_phone || null, id: Number(req.params.id) },
+              contact_email=:email, contact_phone=:phone
+        WHERE operator_id=:id`,
+      {
+        name:  operator_name,
+        mid:   Number(mode_id),
+        email: contact_email || null,
+        phone: contact_phone || null,
+        id:    Number(req.params.id),
+      },
       { autoCommit: true }
     );
     return res.json({ success: true });
-  } catch (err) { return res.status(500).json({ error: "Failed to update operator." }); }
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "Failed to update operator." });
+  }
 });
 
 router.delete("/operators/:id", async (req, res) => {
   try {
-    await execute(`DELETE FROM OPERATOR WHERE operator_id=:id`,
-      { id: Number(req.params.id) }, { autoCommit: true });
+    await execute(
+      `DELETE FROM OPERATOR WHERE operator_id=:id`,
+      { id: Number(req.params.id) },
+      { autoCommit: true }
+    );
     return res.json({ success: true });
-  } catch (err) { return res.status(500).json({ error: "Failed to delete operator." }); }
+  } catch (err) {
+    return res.status(500).json({ error: "Failed to delete operator." });
+  }
 });
 
-// ─── Locations ────────────────────────────────────────────────────────────────
+// ─── LOCATIONS ────────────────────────────────────────────────────────────────
+
 router.get("/locations", async (req, res) => {
   try {
-    const r = await execute(`SELECT location_id AS id, location_name, city, state, location_type
-                               FROM LOCATION ORDER BY location_id`);
+    const r = await execute(
+      `SELECT location_id AS id, location_name, city, state, location_type
+         FROM LOCATION ORDER BY location_id`
+    );
     return res.json(r.rows.map((row) => ({
-      id: row.ID, location_name: row.LOCATION_NAME,
-      city: row.CITY, state: row.STATE, location_type: row.LOCATION_TYPE,
+      id:            row.ID,
+      location_name: row.LOCATION_NAME,
+      city:          row.CITY,
+      state:         row.STATE,
+      // Convert DB values back to display labels for the frontend
+      location_type: LOCATION_TYPE_TO_DISPLAY[row.LOCATION_TYPE] || row.LOCATION_TYPE,
     })));
-  } catch (err) { return res.status(500).json({ error: "Failed." }); }
+  } catch (err) {
+    return res.status(500).json({ error: "Failed to load locations." });
+  }
 });
 
 router.post("/locations", async (req, res) => {
   const { location_name, city, state, location_type } = req.body;
+  const dbType = LOCATION_TYPE_TO_DB[location_type];
+  if (!dbType) {
+    return res.status(400).json({ error: `Invalid location_type: ${location_type}` });
+  }
   try {
     const r = await execute(
       `INSERT INTO LOCATION (location_name, city, state, location_type)
        VALUES (:name, :city, :state, :type) RETURNING location_id INTO :id`,
-      { name: location_name, city, state, type: location_type,
-        id: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER } },
+      {
+        name:  location_name,
+        city,
+        state,
+        type:  dbType,
+        id:    { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
+      },
       { autoCommit: true }
     );
     return res.status(201).json({ id: r.outBinds.id[0] });
-  } catch (err) { return res.status(500).json({ error: "Failed to create location." }); }
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "Failed to create location." });
+  }
 });
 
 router.put("/locations/:id", async (req, res) => {
   const { location_name, city, state, location_type } = req.body;
+  const dbType = LOCATION_TYPE_TO_DB[location_type];
+  if (!dbType) {
+    return res.status(400).json({ error: `Invalid location_type: ${location_type}` });
+  }
   try {
     await execute(
-      `UPDATE LOCATION SET location_name=:name, city=:city, state=:state, location_type=:type
-        WHERE location_id=:id`,
-      { name: location_name, city, state, type: location_type, id: Number(req.params.id) },
+      `UPDATE LOCATION SET location_name=:name, city=:city,
+              state=:state, location_type=:type WHERE location_id=:id`,
+      { name: location_name, city, state, type: dbType, id: Number(req.params.id) },
       { autoCommit: true }
     );
     return res.json({ success: true });
-  } catch (err) { return res.status(500).json({ error: "Failed to update location." }); }
+  } catch (err) {
+    return res.status(500).json({ error: "Failed to update location." });
+  }
 });
 
 router.delete("/locations/:id", async (req, res) => {
   try {
-    await execute(`DELETE FROM LOCATION WHERE location_id=:id`,
-      { id: Number(req.params.id) }, { autoCommit: true });
+    await execute(
+      `DELETE FROM LOCATION WHERE location_id=:id`,
+      { id: Number(req.params.id) },
+      { autoCommit: true }
+    );
     return res.json({ success: true });
   } catch (err) {
-    return res.status(500).json({ error: "Failed to delete location. It may have dependent routes." });
+    return res.status(500).json({
+      error: "Cannot delete location — it may be used by existing routes.",
+    });
   }
 });
 
-// ─── Vehicles ─────────────────────────────────────────────────────────────────
+// ─── VEHICLES ─────────────────────────────────────────────────────────────────
+
 router.get("/vehicles", async (req, res) => {
   try {
     const r = await execute(
@@ -202,17 +286,24 @@ router.get("/vehicles", async (req, res) => {
               v.total_seats, v.status, v.mode_id, v.operator_id,
               tm.mode_name, op.operator_name
          FROM VEHICLE v
-         JOIN TRAVEL_MODE tm ON v.mode_id = tm.mode_id
-         JOIN OPERATOR op    ON v.operator_id = op.operator_id
+         JOIN TRAVEL_MODE tm ON v.mode_id      = tm.mode_id
+         JOIN OPERATOR op    ON v.operator_id   = op.operator_id
         ORDER BY v.vehicle_id`
     );
     return res.json(r.rows.map((row) => ({
-      id: row.ID, vehicle_number: row.VEHICLE_NUMBER, vehicle_name: row.VEHICLE_NAME,
-      total_seats: row.TOTAL_SEATS, status: row.STATUS,
-      mode_id: row.MODE_ID, mode_name: row.MODE_NAME,
-      operator_id: row.OPERATOR_ID, operator_name: row.OPERATOR_NAME,
+      id:             row.ID,
+      vehicle_number: row.VEHICLE_NUMBER,
+      vehicle_name:   row.VEHICLE_NAME,
+      total_seats:    row.TOTAL_SEATS,
+      status:         row.STATUS,
+      mode_id:        row.MODE_ID,
+      mode_name:      row.MODE_NAME,
+      operator_id:    row.OPERATOR_ID,
+      operator_name:  row.OPERATOR_NAME,
     })));
-  } catch (err) { return res.status(500).json({ error: "Failed." }); }
+  } catch (err) {
+    return res.status(500).json({ error: "Failed to load vehicles." });
+  }
 });
 
 router.post("/vehicles", async (req, res) => {
@@ -221,13 +312,22 @@ router.post("/vehicles", async (req, res) => {
     const r = await execute(
       `INSERT INTO VEHICLE (mode_id, operator_id, vehicle_number, vehicle_name, total_seats, status)
        VALUES (:mid, :oid, :vnum, :vname, :seats, :stat) RETURNING vehicle_id INTO :id`,
-      { mid: Number(mode_id), oid: Number(operator_id), vnum: vehicle_number,
-        vname: vehicle_name, seats: Number(total_seats), stat: status || "active",
-        id: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER } },
+      {
+        mid:   Number(mode_id),
+        oid:   Number(operator_id),
+        vnum:  vehicle_number,
+        vname: vehicle_name,
+        seats: Number(total_seats),
+        stat:  status || "active",
+        id:    { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
+      },
       { autoCommit: true }
     );
     return res.status(201).json({ id: r.outBinds.id[0] });
-  } catch (err) { return res.status(500).json({ error: "Failed to create vehicle." }); }
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "Failed to create vehicle." });
+  }
 });
 
 router.put("/vehicles/:id", async (req, res) => {
@@ -235,25 +335,40 @@ router.put("/vehicles/:id", async (req, res) => {
   try {
     await execute(
       `UPDATE VEHICLE SET mode_id=:mid, operator_id=:oid, vehicle_number=:vnum,
-              vehicle_name=:vname, total_seats=:seats, status=:stat WHERE vehicle_id=:id`,
-      { mid: Number(mode_id), oid: Number(operator_id), vnum: vehicle_number,
-        vname: vehicle_name, seats: Number(total_seats), stat: status,
-        id: Number(req.params.id) },
+              vehicle_name=:vname, total_seats=:seats, status=:stat
+        WHERE vehicle_id=:id`,
+      {
+        mid:   Number(mode_id),
+        oid:   Number(operator_id),
+        vnum:  vehicle_number,
+        vname: vehicle_name,
+        seats: Number(total_seats),
+        stat:  status,
+        id:    Number(req.params.id),
+      },
       { autoCommit: true }
     );
     return res.json({ success: true });
-  } catch (err) { return res.status(500).json({ error: "Failed to update vehicle." }); }
+  } catch (err) {
+    return res.status(500).json({ error: "Failed to update vehicle." });
+  }
 });
 
 router.delete("/vehicles/:id", async (req, res) => {
   try {
-    await execute(`DELETE FROM VEHICLE WHERE vehicle_id=:id`,
-      { id: Number(req.params.id) }, { autoCommit: true });
+    await execute(
+      `DELETE FROM VEHICLE WHERE vehicle_id=:id`,
+      { id: Number(req.params.id) },
+      { autoCommit: true }
+    );
     return res.json({ success: true });
-  } catch (err) { return res.status(500).json({ error: "Failed to delete vehicle." }); }
+  } catch (err) {
+    return res.status(500).json({ error: "Failed to delete vehicle." });
+  }
 });
 
-// ─── Routes ───────────────────────────────────────────────────────────────────
+// ─── ROUTES ───────────────────────────────────────────────────────────────────
+
 router.get("/routes", async (req, res) => {
   try {
     const routeRes = await execute(
@@ -263,51 +378,62 @@ router.get("/routes", async (req, res) => {
               l1.location_name AS origin_name,
               l2.location_name AS destination_name
          FROM ROUTE r
-         JOIN TRAVEL_MODE tm ON r.mode_id            = tm.mode_id
-         JOIN OPERATOR op    ON r.operator_id         = op.operator_id
-         JOIN LOCATION l1    ON r.start_location_id  = l1.location_id
-         JOIN LOCATION l2    ON r.end_location_id    = l2.location_id
+         JOIN TRAVEL_MODE tm ON r.mode_id           = tm.mode_id
+         JOIN OPERATOR op    ON r.operator_id        = op.operator_id
+         JOIN LOCATION l1    ON r.start_location_id = l1.location_id
+         JOIN LOCATION l2    ON r.end_location_id   = l2.location_id
         ORDER BY r.route_id`
     );
 
-    const routes = await Promise.all(routeRes.rows.map(async (row) => {
-      const [stopsRes, schedRes] = await Promise.all([
-        execute(
-          `SELECT rs.route_stop_id, rs.location_id, loc.location_name, loc.city,
-                  rs.arrival_offset_min, rs.departure_offset_min
-             FROM ROUTE_STOP rs JOIN LOCATION loc ON rs.location_id = loc.location_id
-            WHERE rs.route_id = :rid ORDER BY rs.stop_sequence`,
-          { rid: row.ID }
-        ),
-        execute(
-          `SELECT vehicle_id, departure_datetime, arrival_datetime, status
-             FROM SCHEDULE WHERE route_id = :rid
-            ORDER BY departure_datetime DESC FETCH FIRST 1 ROWS ONLY`,
-          { rid: row.ID }
-        ),
-      ]);
-      const sched = schedRes.rows[0];
-      return {
-        id: row.ID, route_name: row.ROUTE_NAME,
-        mode_id: row.MODE_ID, mode_type: row.MODE_TYPE,
-        operator_id: row.OPERATOR_ID, operator_name: row.OPERATOR_NAME,
-        origin: row.START_LOCATION_ID, origin_name: row.ORIGIN_NAME,
-        destination: row.END_LOCATION_ID, destination_name: row.DESTINATION_NAME,
-        departureTime: sched ? toTimePart(sched.DEPARTURE_DATETIME) : "",
-        arrivalTime: sched ? toTimePart(sched.ARRIVAL_DATETIME) : "",
-        bookingStartDate: sched ? toDatePart(sched.DEPARTURE_DATETIME) : "",
-        bookingEndDate: "",
-        vehicle_id: sched?.VEHICLE_ID || "",
-        status: sched?.STATUS || "scheduled",
-        serviceDays: [],
-        intermediateStops: stopsRes.rows.map((s) => ({
-          route_stop_id: s.ROUTE_STOP_ID,
-          location_id: s.LOCATION_ID,
-          location_name: s.LOCATION_NAME,
-          arrival_time: "", departure_time: "",
-        })),
-      };
-    }));
+    const routes = await Promise.all(
+      routeRes.rows.map(async (row) => {
+        const [stopsRes, schedRes] = await Promise.all([
+          execute(
+            `SELECT rs.route_stop_id, rs.location_id,
+                    loc.location_name, loc.city
+               FROM ROUTE_STOP rs
+               JOIN LOCATION loc ON rs.location_id = loc.location_id
+              WHERE rs.route_id = :rid
+              ORDER BY rs.stop_sequence`,
+            { rid: row.ID }
+          ),
+          execute(
+            `SELECT vehicle_id, departure_datetime, arrival_datetime, status
+               FROM SCHEDULE WHERE route_id = :rid
+              ORDER BY departure_datetime DESC FETCH FIRST 1 ROWS ONLY`,
+            { rid: row.ID }
+          ),
+        ]);
+
+        const sched = schedRes.rows[0];
+        return {
+          id:               row.ID,
+          route_name:       row.ROUTE_NAME,
+          mode_id:          row.MODE_ID,
+          mode_type:        row.MODE_TYPE,
+          operator_id:      row.OPERATOR_ID,
+          operator_name:    row.OPERATOR_NAME,
+          origin:           row.START_LOCATION_ID,
+          origin_name:      row.ORIGIN_NAME,
+          destination:      row.END_LOCATION_ID,
+          destination_name: row.DESTINATION_NAME,
+          departureTime:    sched ? toTimePart(sched.DEPARTURE_DATETIME) : "",
+          arrivalTime:      sched ? toTimePart(sched.ARRIVAL_DATETIME) : "",
+          bookingStartDate: sched ? toDatePart(sched.DEPARTURE_DATETIME) : "",
+          bookingEndDate:   "",
+          vehicle_id:       sched?.VEHICLE_ID || "",
+          status:           sched?.STATUS || "scheduled",
+          serviceDays:      [],
+          intermediateStops: stopsRes.rows.map((s) => ({
+            route_stop_id: s.ROUTE_STOP_ID,
+            location_id:   s.LOCATION_ID,
+            location_name: s.LOCATION_NAME,
+            arrival_time:  "",
+            departure_time: "",
+          })),
+        };
+      })
+    );
 
     return res.json(routes);
   } catch (err) {
@@ -317,13 +443,17 @@ router.get("/routes", async (req, res) => {
 });
 
 router.post("/routes", async (req, res) => {
-  const { mode_id, operator_id, origin, destination,
-          departureTime, arrivalTime, vehicle_id,
-          bookingStartDate, intermediateStops = [], status = "scheduled" } = req.body;
+  const {
+    mode_id, operator_id, origin, destination,
+    departureTime, arrivalTime, vehicle_id,
+    bookingStartDate, intermediateStops = [], status = "scheduled",
+  } = req.body;
+
   let conn;
   try {
-    conn = await oracledb.getPool().getConnection();
+    conn = await getConnection();
 
+    // Build route name from city names
     const locRes = await conn.execute(
       `SELECT location_id, city FROM LOCATION WHERE location_id IN (:s, :e)`,
       { s: Number(origin), e: Number(destination) },
@@ -331,41 +461,58 @@ router.post("/routes", async (req, res) => {
     );
     const cityMap = {};
     locRes.rows.forEach((r) => { cityMap[r.LOCATION_ID] = r.CITY; });
-    const routeName = `${cityMap[Number(origin)] || origin} - ${cityMap[Number(destination)] || destination}`;
+    const routeName =
+      `${cityMap[Number(origin)] || origin} - ${cityMap[Number(destination)] || destination}`;
 
+    // Insert route
     const rRes = await conn.execute(
-      `INSERT INTO ROUTE (route_name, mode_id, operator_id, start_location_id, end_location_id,
-              total_distance_km, total_duration_min)
-       VALUES (:rn, :mid, :oid, :slid, :elid, 0, 0) RETURNING route_id INTO :rid`,
-      { rn: routeName, mid: Number(mode_id), oid: Number(operator_id),
-        slid: Number(origin), elid: Number(destination),
-        rid: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER } }
+      `INSERT INTO ROUTE
+         (route_name, mode_id, operator_id, start_location_id, end_location_id,
+          total_distance_km, total_duration_min)
+       VALUES (:rn, :mid, :oid, :slid, :elid, 0, 0)
+       RETURNING route_id INTO :rid`,
+      {
+        rn:   routeName,
+        mid:  Number(mode_id),
+        oid:  Number(operator_id),
+        slid: Number(origin),
+        elid: Number(destination),
+        rid:  { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
+      },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
     const routeId = rRes.outBinds.rid[0];
 
+    // Insert intermediate stops
     for (let i = 0; i < intermediateStops.length; i++) {
       await conn.execute(
-        `INSERT INTO ROUTE_STOP (route_id, location_id, stop_sequence,
-                arrival_offset_min, departure_offset_min, halt_minutes)
+        `INSERT INTO ROUTE_STOP
+           (route_id, location_id, stop_sequence,
+            arrival_offset_min, departure_offset_min, halt_minutes)
          VALUES (:rid, :lid, :seq, 0, 0, 0)`,
         { rid: routeId, lid: Number(intermediateStops[i].location_id), seq: i + 1 }
       );
     }
 
+    // Insert schedule if times provided
     if (bookingStartDate && departureTime && arrivalTime && vehicle_id) {
       await conn.execute(
-        `INSERT INTO SCHEDULE (vehicle_id, route_id, departure_datetime, arrival_datetime,
-                base_fare, seats_remaining, status)
+        `INSERT INTO SCHEDULE
+           (vehicle_id, route_id, departure_datetime, arrival_datetime,
+            base_fare, seats_remaining, status)
          VALUES (:vid, :rid,
                  TO_TIMESTAMP(:dep, 'YYYY-MM-DD HH24:MI'),
                  TO_TIMESTAMP(:arr, 'YYYY-MM-DD HH24:MI'),
                  0,
-                 (SELECT total_seats FROM VEHICLE WHERE vehicle_id=:vid),
+                 (SELECT total_seats FROM VEHICLE WHERE vehicle_id = :vid),
                  :stat)`,
-        { vid: Number(vehicle_id), rid: routeId,
-          dep: `${bookingStartDate} ${departureTime}`,
-          arr: `${bookingStartDate} ${arrivalTime}`,
-          stat: status }
+        {
+          vid:  Number(vehicle_id),
+          rid:  routeId,
+          dep:  `${bookingStartDate} ${departureTime}`,
+          arr:  `${bookingStartDate} ${arrivalTime}`,
+          stat: status,
+        }
       );
     }
 
@@ -382,39 +529,60 @@ router.post("/routes", async (req, res) => {
 
 router.put("/routes/:id", async (req, res) => {
   const routeId = Number(req.params.id);
-  const { mode_id, operator_id, origin, destination,
-          departureTime, arrivalTime, vehicle_id,
-          bookingStartDate, intermediateStops = [], status } = req.body;
+  const {
+    mode_id, operator_id, origin, destination,
+    departureTime, arrivalTime, vehicle_id,
+    bookingStartDate, intermediateStops = [], status,
+  } = req.body;
+
   let conn;
   try {
-    conn = await oracledb.getPool().getConnection();
+    conn = await getConnection();
+
     await conn.execute(
       `UPDATE ROUTE SET mode_id=:mid, operator_id=:oid,
-              start_location_id=:slid, end_location_id=:elid WHERE route_id=:rid`,
-      { mid: Number(mode_id), oid: Number(operator_id),
-        slid: Number(origin), elid: Number(destination), rid: routeId }
+              start_location_id=:slid, end_location_id=:elid
+        WHERE route_id=:rid`,
+      {
+        mid:  Number(mode_id),
+        oid:  Number(operator_id),
+        slid: Number(origin),
+        elid: Number(destination),
+        rid:  routeId,
+      }
     );
+
+    // Replace stops
     await conn.execute(`DELETE FROM ROUTE_STOP WHERE route_id=:rid`, { rid: routeId });
     for (let i = 0; i < intermediateStops.length; i++) {
       await conn.execute(
-        `INSERT INTO ROUTE_STOP (route_id, location_id, stop_sequence,
-                arrival_offset_min, departure_offset_min, halt_minutes)
+        `INSERT INTO ROUTE_STOP
+           (route_id, location_id, stop_sequence,
+            arrival_offset_min, departure_offset_min, halt_minutes)
          VALUES (:rid, :lid, :seq, 0, 0, 0)`,
         { rid: routeId, lid: Number(intermediateStops[i].location_id), seq: i + 1 }
       );
     }
-    if (departureTime && arrivalTime && bookingStartDate) {
+
+    // Update schedule
+    if (departureTime && arrivalTime && bookingStartDate && vehicle_id) {
       await conn.execute(
-        `UPDATE SCHEDULE SET
-                departure_datetime=TO_TIMESTAMP(:dep,'YYYY-MM-DD HH24:MI'),
-                arrival_datetime=TO_TIMESTAMP(:arr,'YYYY-MM-DD HH24:MI'),
-                vehicle_id=:vid, status=:stat
-          WHERE route_id=:rid`,
-        { dep: `${bookingStartDate} ${departureTime}`,
-          arr: `${bookingStartDate} ${arrivalTime}`,
-          vid: Number(vehicle_id), stat: status || "scheduled", rid: routeId }
+        `UPDATE SCHEDULE
+            SET departure_datetime = TO_TIMESTAMP(:dep, 'YYYY-MM-DD HH24:MI'),
+                arrival_datetime   = TO_TIMESTAMP(:arr, 'YYYY-MM-DD HH24:MI'),
+                vehicle_id         = :vid,
+                status             = :stat
+          WHERE route_id = :rid`,
+        {
+          dep:  `${bookingStartDate} ${departureTime}`,
+          arr:  `${bookingStartDate} ${arrivalTime}`,
+          vid:  Number(vehicle_id),
+          stat: status || "scheduled",
+          rid:  routeId,
+        }
       );
     }
+
     await conn.commit();
     return res.json({ success: true });
   } catch (err) {
@@ -427,10 +595,16 @@ router.put("/routes/:id", async (req, res) => {
 
 router.delete("/routes/:id", async (req, res) => {
   try {
-    await execute(`DELETE FROM ROUTE WHERE route_id=:id`,
-      { id: Number(req.params.id) }, { autoCommit: true });
+    // CASCADE on ROUTE_STOP and SCHEDULE handles children
+    await execute(
+      `DELETE FROM ROUTE WHERE route_id=:id`,
+      { id: Number(req.params.id) },
+      { autoCommit: true }
+    );
     return res.json({ success: true });
-  } catch (err) { return res.status(500).json({ error: "Failed to delete route." }); }
+  } catch (err) {
+    return res.status(500).json({ error: "Failed to delete route." });
+  }
 });
 
 module.exports = router;

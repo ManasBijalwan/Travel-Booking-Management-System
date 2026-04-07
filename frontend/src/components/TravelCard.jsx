@@ -1,57 +1,59 @@
-import { Link, useLocation } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
+import { useNavigate } from "react-router-dom";
 
 function TravelCard({ travel }) {
-  const { user } = useAuth();
-  const location = useLocation();
+  const navigate = useNavigate();
 
-  const bookingTarget = user?.role === "user"
-    ? `/booking/${travel.id}`
-    : `/login/user?redirect=${encodeURIComponent(`/booking/${travel.id}`)}`;
+  const handleBook = () => {
+    navigate(`/booking/${travel.id}`, { state: { travel } });
+  };
 
   return (
-    <article className="travel-card">
-      <div className="travel-card__header">
+    <article className="travel-card panel">
+      <div className="section-heading">
         <div>
-          <p className="eyebrow">{travel.type}</p>
+          <p className="eyebrow">{travel.type} · {travel.operatorName}</p>
           <h3>{travel.name}</h3>
         </div>
-        <span className="price-tag">{travel.price}</span>
+        <span className="price-tag">₹{Number(travel.price).toLocaleString("en-IN")}</span>
       </div>
 
       <div className="travel-route">
         <div>
-          <strong>{travel.origin}</strong>
-          <span>{travel.departureTime}</span>
+          <p className="travel-time">{travel.departureTime}</p>
+          <p className="travel-city">{travel.origin}</p>
         </div>
-        <div className="travel-route__line">{travel.duration}</div>
+        <div className="travel-route__mid">
+          <span className="helper-text">{travel.duration}</span>
+          <div className="travel-route__line" />
+        </div>
         <div>
-          <strong>{travel.destination}</strong>
-          <span>{travel.arrivalTime}</span>
+          <p className="travel-time">{travel.arrivalTime}</p>
+          <p className="travel-city">{travel.destination}</p>
         </div>
       </div>
 
-      <div className="meta-grid">
-        <span>{travel.departureDate}</span>
-        <span>{travel.seatsAvailable} seats left</span>
-        <span>{travel.vehicleCode}</span>
-      </div>
-
-      <div className="amenity-list">
-        {travel.amenities.map((amenity) => (
-          <span key={amenity}>{amenity}</span>
-        ))}
-      </div>
-
-      {user?.role === "admin" ? (
-        <Link to="/admin/dashboard" className="ghost-button">
-          View Admin Dashboard
-        </Link>
-      ) : (
-        <Link to={bookingTarget} state={{ from: location, travel }} className="primary-button">
-          {user?.role === "user" ? "Book Now" : "Login To Book"}
-        </Link>
+      {travel.amenities?.length > 0 && (
+        <div className="amenity-list">
+          {travel.amenities.map((stop) => (
+            <span key={stop} className="amenity-tag">{stop}</span>
+          ))}
+        </div>
       )}
+
+      <div className="card-footer">
+        <span className="helper-text">
+          {travel.seatsAvailable} seat{travel.seatsAvailable === 1 ? "" : "s"} left
+          · {travel.departureDate}
+        </span>
+        <button
+          type="button"
+          className="primary-button"
+          onClick={handleBook}
+          disabled={!travel.seatsAvailable}
+        >
+          {travel.seatsAvailable ? "Book Now" : "Sold Out"}
+        </button>
+      </div>
     </article>
   );
 }

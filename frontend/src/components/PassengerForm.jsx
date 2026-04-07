@@ -1,39 +1,35 @@
 function PassengerForm({ passengers, onChange, maxPassengers }) {
   const updatePassenger = (index, field, value) => {
-    const nextPassengers = passengers.map((passenger, passengerIndex) =>
-      passengerIndex === index ? { ...passenger, [field]: value, isSaved: false } : passenger
+    const nextPassengers = passengers.map((passenger, i) =>
+      i === index ? { ...passenger, [field]: value, isSaved: false } : passenger
     );
     onChange(nextPassengers);
   };
 
   const addPassenger = () => {
-    if (passengers.length >= maxPassengers) {
-      return;
-    }
-
+    if (passengers.length >= maxPassengers) return;
     onChange([
       ...passengers,
-      { passenger_name: "", age: "", gender: "Male", id_proof_number: "", isSaved: false }
+      { passenger_name: "", age: "", gender: "Male", id_proof_number: "", isSaved: false },
     ]);
   };
 
   const savePassenger = (index) => {
     const passenger = passengers[index];
     const hasDetails =
-      passenger.passenger_name && passenger.age && passenger.gender && passenger.id_proof_number;
-
-    if (!hasDetails) {
-      return;
-    }
-
-    const nextPassengers = passengers.map((item, passengerIndex) =>
-      passengerIndex === index ? { ...item, isSaved: true } : item
+      passenger.passenger_name &&
+      passenger.age &&
+      passenger.gender &&
+      passenger.id_proof_number;
+    if (!hasDetails) return;
+    const nextPassengers = passengers.map((item, i) =>
+      i === index ? { ...item, isSaved: true } : item
     );
     onChange(nextPassengers);
   };
 
   const removePassenger = (index) => {
-    onChange(passengers.filter((_, passengerIndex) => passengerIndex !== index));
+    onChange(passengers.filter((_, i) => i !== index));
   };
 
   return (
@@ -42,7 +38,10 @@ function PassengerForm({ passengers, onChange, maxPassengers }) {
         <div>
           <p className="eyebrow">Step 1</p>
           <h3>Passenger Details</h3>
-          <p className="helper-text">You can add up to {maxPassengers} passenger{maxPassengers === 1 ? "" : "s"} for this trip.</p>
+          <p className="helper-text">
+            You can add up to {maxPassengers} passenger
+            {maxPassengers === 1 ? "" : "s"} for this trip.
+          </p>
         </div>
         <button
           type="button"
@@ -59,7 +58,9 @@ function PassengerForm({ passengers, onChange, maxPassengers }) {
           <div key={`${passenger.passenger_name}-${index}`} className="panel">
             <div className="section-heading">
               <h4>Passenger {index + 1}</h4>
-              <span className={`status-badge ${passenger.isSaved ? "confirmed" : "pending"}`}>
+              <span
+                className={`status-badge ${passenger.isSaved ? "confirmed" : "pending"}`}
+              >
                 {passenger.isSaved ? "Saved" : "Pending"}
               </span>
             </div>
@@ -68,17 +69,21 @@ function PassengerForm({ passengers, onChange, maxPassengers }) {
               <input
                 placeholder="Passenger name"
                 value={passenger.passenger_name}
-                onChange={(event) => updatePassenger(index, "passenger_name", event.target.value)}
+                onChange={(e) =>
+                  updatePassenger(index, "passenger_name", e.target.value)
+                }
               />
               <input
                 type="number"
                 placeholder="Age"
                 value={passenger.age}
-                onChange={(event) => updatePassenger(index, "age", event.target.value)}
+                onChange={(e) => updatePassenger(index, "age", e.target.value)}
               />
               <select
                 value={passenger.gender}
-                onChange={(event) => updatePassenger(index, "gender", event.target.value)}
+                onChange={(e) =>
+                  updatePassenger(index, "gender", e.target.value)
+                }
               >
                 <option>Male</option>
                 <option>Female</option>
@@ -87,12 +92,18 @@ function PassengerForm({ passengers, onChange, maxPassengers }) {
               <input
                 placeholder="ID proof number"
                 value={passenger.id_proof_number}
-                onChange={(event) => updatePassenger(index, "id_proof_number", event.target.value)}
+                onChange={(e) =>
+                  updatePassenger(index, "id_proof_number", e.target.value)
+                }
               />
             </div>
 
             <div className="action-row">
-              <button type="button" className="ghost-button" onClick={() => savePassenger(index)}>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => savePassenger(index)}
+              >
                 Save Passenger
               </button>
               <button

@@ -1,27 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
-import { getAdminResource } from "../../services/travelService";
+import { getAdminResource } from "../../services/adminService";
 
 function AdminCancellationsPage() {
   const [records, setRecords] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
 
   useEffect(() => {
-    const loadRecords = async () => {
-      const result = await getAdminResource("cancellations");
-      setRecords(result);
-    };
-
-    loadRecords();
+    getAdminResource("cancellations").then(setRecords);
   }, []);
 
   const filteredRecords = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
-    if (!query) {
-      return records;
-    }
-
+    if (!query) return records;
     return records.filter((record) =>
-      [record.id, record.bookingId, record.route, record.reason, record.refundStatus, record.refundAmount]
+      [record.id, record.bookingId, record.route, record.reason,
+       record.refundStatus, record.refundAmount]
         .join(" ")
         .toLowerCase()
         .includes(query)
@@ -37,12 +30,13 @@ function AdminCancellationsPage() {
           <p>Track cancelled bookings, refund amount, and reimbursement status.</p>
         </div>
       </div>
+
       <div className="panel table-wrap">
         <input
           type="text"
           placeholder="Search cancellations"
           value={searchTerm}
-          onChange={(event) => setSearchTerm(event.target.value)}
+          onChange={(e) => setSearchTerm(e.target.value)}
         />
         <table>
           <thead>

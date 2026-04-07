@@ -1,16 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import AdminResourcePage from "../../components/AdminResourcePage";
-import { deleteAdminResource, getAdminResource, upsertAdminResource } from "../../services/travelService";
-
-const fields = [
-  { name: "operator_name", label: "Operator Name" },
-  { name: "mode_type", label: "Mode Type", type: "select", options: ["bus", "train", "flight"] },
-  { name: "contact_email", label: "Contact Email", type: "email" },
-  { name: "contact_phone", label: "Contact Phone" }
-];
+import {
+  deleteAdminResource,
+  getAdminResource,
+  upsertAdminResource,
+} from "../../services/adminService";
+import { getVehicleFormOptions } from "../../services/adminService";
 
 function AdminOperatorsPage() {
   const [records, setRecords] = useState([]);
+  const [modeOptions, setModeOptions] = useState([]);
 
   const loadRecords = async () => {
     const result = await getAdminResource("operators");
@@ -19,7 +18,23 @@ function AdminOperatorsPage() {
 
   useEffect(() => {
     loadRecords();
+    getVehicleFormOptions().then((opts) => setModeOptions(opts.modes));
   }, []);
+
+  const fields = useMemo(
+    () => [
+      { name: "operator_name", label: "Operator Name" },
+      {
+        name: "mode_id",
+        label: "Travel Mode",
+        type: "select",
+        options: modeOptions,
+      },
+      { name: "contact_email", label: "Contact Email", type: "email" },
+      { name: "contact_phone", label: "Contact Phone" },
+    ],
+    [modeOptions]
+  );
 
   const handleSave = async (record) => {
     await upsertAdminResource("operators", record);

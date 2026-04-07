@@ -27,6 +27,7 @@ function App() {
         <Route path="/login/user" element={<LoginPage role="user" />} />
         <Route path="/login/admin" element={<LoginPage role="admin" />} />
         <Route path="/register" element={<RegisterPage />} />
+
         <Route
           path="/search"
           element={

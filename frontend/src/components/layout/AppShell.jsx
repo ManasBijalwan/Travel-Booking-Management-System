@@ -7,7 +7,10 @@ function AppShell() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <NavLink to={user ? (isAdmin ? "/admin/dashboard" : "/search") : "/login/user"} className="brand">
+        <NavLink
+          to={user ? (isAdmin ? "/admin/dashboard" : "/search") : "/login/user"}
+          className="brand"
+        >
           TravelSphere
         </NavLink>
 
@@ -20,7 +23,9 @@ function AppShell() {
         <div className="auth-actions">
           {user ? (
             <>
-              <span className="user-pill">{user.name} ({user.role})</span>
+              <span className="user-pill">
+                {user.name} ({user.role})
+              </span>
               <button type="button" className="ghost-button" onClick={logout}>
                 Logout
               </button>

@@ -1,13 +1,25 @@
 import { useEffect, useState } from "react";
 import AdminResourcePage from "../../components/AdminResourcePage";
-import { deleteAdminResource, getAdminResource, upsertAdminResource } from "../../services/travelService";
+import {
+  deleteAdminResource,
+  getAdminResource,
+  upsertAdminResource,
+} from "../../services/adminService";
 
 const fields = [
   { name: "location_name", label: "Location Name" },
   { name: "city", label: "City" },
   { name: "state", label: "State" },
-  { name: "country", label: "Country" },
-  { name: "location_type", label: "Location Type", type: "select", options: ["Airport", "Bus Stand", "Railway Station"] }
+  {
+    name: "location_type",
+    label: "Location Type",
+    type: "select",
+    options: [
+      { value: "Airport", label: "Airport" },
+      { value: "Bus Stand", label: "Bus Stand" },
+      { value: "Railway Station", label: "Railway Station" },
+    ],
+  },
 ];
 
 function AdminLocationsPage() {

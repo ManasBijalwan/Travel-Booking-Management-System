@@ -11,7 +11,7 @@ function PaymentForm({ payment, onChange, totalAmount, onSubmit, submitting }) {
           <p className="eyebrow">Step 3</p>
           <h3>Payment</h3>
         </div>
-        <span className="price-tag">{totalAmount}</span>
+        <span className="price-tag">₹{Number(totalAmount || 0).toLocaleString("en-IN")}</span>
       </div>
 
       <div className="form-grid">
@@ -40,7 +40,12 @@ function PaymentForm({ payment, onChange, totalAmount, onSubmit, submitting }) {
         />
       </div>
 
-      <button type="button" className="primary-button" onClick={onSubmit} disabled={submitting}>
+      <button
+        type="button"
+        className="primary-button"
+        onClick={onSubmit}
+        disabled={submitting}
+      >
         {submitting ? "Processing..." : "Confirm Booking"}
       </button>
     </section>

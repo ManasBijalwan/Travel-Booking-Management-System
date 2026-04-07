@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { deleteAdminResource, getAdminResource } from "../../services/travelService";
+import { deleteAdminResource, getAdminResource } from "../../services/adminService";
 
 function AdminBookingsPage() {
   const [records, setRecords] = useState([]);
@@ -21,18 +21,15 @@ function AdminBookingsPage() {
 
   const filteredRecords = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
-    if (!query) {
-      return records;
-    }
-
+    if (!query) return records;
     return records.filter((record) =>
       [
         record.id,
         record.travel?.name,
         record.status,
         record.paymentStatus,
-        record.selectedSeats.join(", "),
-        record.pnr
+        record.selectedSeats?.join(", "),
+        record.pnr,
       ]
         .join(" ")
         .toLowerCase()
@@ -49,17 +46,19 @@ function AdminBookingsPage() {
           <p>View reservations, passenger counts, payment state, and trip assignments.</p>
         </div>
       </div>
+
       <div className="panel table-wrap">
         <input
           type="text"
           placeholder="Search bookings"
           value={searchTerm}
-          onChange={(event) => setSearchTerm(event.target.value)}
+          onChange={(e) => setSearchTerm(e.target.value)}
         />
         <table>
           <thead>
             <tr>
               <th>ID</th>
+              <th>PNR</th>
               <th>Trip</th>
               <th>Passengers</th>
               <th>Seats</th>
@@ -72,9 +71,10 @@ function AdminBookingsPage() {
             {filteredRecords.map((record) => (
               <tr key={record.id}>
                 <td>{record.id}</td>
+                <td>{record.pnr}</td>
                 <td>{record.travel?.name || record.travelId}</td>
-                <td>{record.passengers.length}</td>
-                <td>{record.selectedSeats.join(", ")}</td>
+                <td>{record.passengers?.length}</td>
+                <td>{record.selectedSeats?.join(", ")}</td>
                 <td>{record.status}</td>
                 <td>{record.paymentStatus}</td>
                 <td>

@@ -1,6 +1,13 @@
 const oracledb = require("oracledb");
+if (process.env.USE_THICK_MODE === "true") {
+  oracledb.initOracleClient({
+    libDir: process.env.ORACLE_CLIENT_LIB || undefined,
+  });
+  console.log("OracleDB: THICK mode");
+} else {
+  console.log("OracleDB: THIN mode (no Instant Client needed)");
+}
 
-oracledb.initOracleClient();
 oracledb.outFormat = oracledb.OUT_FORMAT_OBJECT;
 oracledb.autoCommit = false;
 
@@ -15,36 +22,32 @@ async function initPool() {
     poolMax: 10,
     poolIncrement: 1,
   });
-  console.log("Oracle connection pool created.");
+  console.log(`Oracle pool ready → ${process.env.DB_CONNECT_STRING}`);
 }
 
 async function execute(sql, binds = {}, opts = {}) {
   let conn;
   try {
     conn = await pool.getConnection();
-    const result = await conn.execute(sql, binds, {
+    return await conn.execute(sql, binds, {
       outFormat: oracledb.OUT_FORMAT_OBJECT,
       ...opts,
     });
-    return result;
   } finally {
-    if (conn) await conn.close();
+    if (conn) try { await conn.close(); } catch (_) {}
   }
 }
 
-async function executeWithConn(sql, binds = {}, opts = {}) {
-  const conn = await pool.getConnection();
-  return { conn, execute: () => conn.execute(sql, binds, opts) };
+async function getConnection() {
+  return pool.getConnection();
 }
 
 async function fetchCursor(cursor) {
   const rows = [];
   let row;
-  while ((row = await cursor.getRow()) !== null) {
-    rows.push(row);
-  }
+  while ((row = await cursor.getRow()) !== null) rows.push(row);
   await cursor.close();
   return rows;
 }
 
-module.exports = { initPool, execute, executeWithConn, fetchCursor };
+module.exports = { initPool, execute, getConnection, fetchCursor };

@@ -1,16 +1,11 @@
 import { useEffect, useState } from "react";
-import { getAdminOverview } from "../../services/travelService";
+import { getAdminOverview } from "../../services/adminService";
 
 function AdminDashboardPage() {
   const [overview, setOverview] = useState({ metrics: [], bookings: [], payments: [] });
 
   useEffect(() => {
-    const loadOverview = async () => {
-      const result = await getAdminOverview();
-      setOverview(result);
-    };
-
-    loadOverview();
+    getAdminOverview().then(setOverview);
   }, []);
 
   return (

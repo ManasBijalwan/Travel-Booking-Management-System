@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
+import apiClient from "../api/client";
 import SearchForm from "../components/SearchForm";
 import TravelCard from "../components/TravelCard";
 import { useAuth } from "../context/AuthContext";
@@ -9,8 +10,25 @@ function SearchPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const { isUser } = useAuth();
+
   const [travels, setTravels] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [modes, setModes] = useState([]);
+
+  // Fetch travel modes for the SearchForm dropdown once
+  useEffect(() => {
+    apiClient
+      .get("/admin/form-options/vehicles")
+      .then((r) => setModes(r.data.modes || []))
+      .catch(() => {
+        // Fallback static list if backend unavailable
+        setModes([
+          { value: "Bus", label: "Bus" },
+          { value: "Train", label: "Train" },
+          { value: "Flight", label: "Flight" },
+        ]);
+      });
+  }, []);
 
   const filters = useMemo(
     () => Object.fromEntries(new URLSearchParams(location.search).entries()),
@@ -18,29 +36,20 @@ function SearchPage() {
   );
 
   const hasSearch = useMemo(
-    () => Object.values(filters).some((value) => String(value || "").trim() !== ""),
+    () => Object.values(filters).some((v) => String(v || "").trim() !== ""),
     [filters]
   );
 
   useEffect(() => {
-    const loadTravels = async () => {
-      setLoading(true);
-      const result = await searchTravels(filters);
-      setTravels(result);
-      setLoading(false);
-    };
-
-    if (!isUser) {
-      return;
-    }
-
-    if (!hasSearch) {
+    if (!isUser || !hasSearch) {
       setTravels([]);
-      setLoading(false);
       return;
     }
-
-    loadTravels();
+    setLoading(true);
+    searchTravels(filters)
+      .then(setTravels)
+      .catch(() => setTravels([]))
+      .finally(() => setLoading(false));
   }, [filters, hasSearch, isUser]);
 
   const handleSearch = (nextFilters) => {
@@ -62,7 +71,12 @@ function SearchPage() {
       </section>
 
       <div className="panel">
-        <SearchForm onSearch={handleSearch} initialValues={filters} compact />
+        <SearchForm
+          onSearch={handleSearch}
+          initialValues={filters}
+          compact
+          modes={modes}
+        />
       </div>
 
       {loading ? (
@@ -70,9 +84,11 @@ function SearchPage() {
       ) : hasSearch ? (
         <div className="card-grid">
           {travels.length ? (
-            travels.map((travel) => <TravelCard key={travel.id} travel={travel} />)
+            travels.map((travel) => (
+              <TravelCard key={travel.id} travel={travel} />
+            ))
           ) : (
-            <div className="panel">No trips found.</div>
+            <div className="panel">No trips found for your search.</div>
           )}
         </div>
       ) : null}

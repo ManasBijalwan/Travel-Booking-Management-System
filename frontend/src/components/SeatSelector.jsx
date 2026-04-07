@@ -1,13 +1,9 @@
 function SeatSelector({ seatMap, selectedSeats, onChange, maxSeats }) {
   const toggleSeat = (seat) => {
     const exists = selectedSeats.includes(seat);
-
-    if (!exists && selectedSeats.length >= maxSeats) {
-      return;
-    }
-
+    if (!exists && selectedSeats.length >= maxSeats) return;
     const nextSeats = exists
-      ? selectedSeats.filter((entry) => entry !== seat)
+      ? selectedSeats.filter((s) => s !== seat)
       : [...selectedSeats, seat];
     onChange(nextSeats);
   };
@@ -18,7 +14,9 @@ function SeatSelector({ seatMap, selectedSeats, onChange, maxSeats }) {
         <div>
           <p className="eyebrow">Step 2</p>
           <h3>Select Seats</h3>
-          <p className="helper-text">Select up to {maxSeats} seat{maxSeats === 1 ? "" : "s"}.</p>
+          <p className="helper-text">
+            Select up to {maxSeats} seat{maxSeats === 1 ? "" : "s"}.
+          </p>
         </div>
         <span className="user-pill">{selectedSeats.length} selected</span>
       </div>

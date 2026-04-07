@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext";
-import { cancelBooking, getBookingsByUser, getCancellationsByUser } from "../services/travelService";
+import {
+  cancelBooking,
+  getBookingsByUser,
+  getCancellationsByUser,
+} from "../services/travelService";
 
 function BookingHistoryPage() {
   const { user } = useAuth();
@@ -10,7 +14,7 @@ function BookingHistoryPage() {
   const loadBookings = async () => {
     const [bookingResult, cancellationResult] = await Promise.all([
       getBookingsByUser(user.id),
-      getCancellationsByUser(user.id)
+      getCancellationsByUser(user.id),
     ]);
     setBookings(bookingResult);
     setCancellations(cancellationResult);
@@ -21,8 +25,12 @@ function BookingHistoryPage() {
   }, []);
 
   const handleCancel = async (bookingId) => {
-    await cancelBooking(bookingId);
-    await loadBookings();
+    try {
+      await cancelBooking(bookingId);
+      await loadBookings();
+    } catch (err) {
+      alert(err.response?.data?.error || "Cancellation failed.");
+    }
   };
 
   return (
@@ -35,11 +43,14 @@ function BookingHistoryPage() {
       </div>
 
       <div className="history-list">
+        {bookings.length === 0 && (
+          <div className="panel">No bookings found.</div>
+        )}
         {bookings.map((booking) => (
           <article key={booking.id} className="panel history-card">
             <div className="section-heading">
               <div>
-                <p className="eyebrow">{booking.id}</p>
+                <p className="eyebrow">PNR: {booking.pnr}</p>
                 <h3>{booking.travel?.name}</h3>
                 <p>
                   {booking.travel?.origin} to {booking.travel?.destination}
@@ -57,7 +68,7 @@ function BookingHistoryPage() {
               <span>Payment: {booking.paymentStatus}</span>
             </div>
 
-            {booking.status !== "Cancelled" && (
+            {booking.status !== "cancelled" && (
               <button
                 type="button"
                 className="ghost-button danger"

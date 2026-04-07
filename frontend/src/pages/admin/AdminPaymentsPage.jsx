@@ -1,25 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
-import { getAdminResource } from "../../services/travelService";
+import { getAdminResource } from "../../services/adminService";
 
 function AdminPaymentsPage() {
   const [records, setRecords] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
 
   useEffect(() => {
-    const loadRecords = async () => {
-      const result = await getAdminResource("payments");
-      setRecords(result);
-    };
-
-    loadRecords();
+    getAdminResource("payments").then(setRecords);
   }, []);
 
   const filteredRecords = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
-    if (!query) {
-      return records;
-    }
-
+    if (!query) return records;
     return records.filter((record) =>
       [record.id, record.bookingId, record.method, record.status, record.amount, record.date]
         .join(" ")
@@ -37,12 +29,13 @@ function AdminPaymentsPage() {
           <p>Monitor payment method, amount collected, and settlement status.</p>
         </div>
       </div>
+
       <div className="panel table-wrap">
         <input
           type="text"
           placeholder="Search payments"
           value={searchTerm}
-          onChange={(event) => setSearchTerm(event.target.value)}
+          onChange={(e) => setSearchTerm(e.target.value)}
         />
         <table>
           <thead>
