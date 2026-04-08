@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
-import apiClient from "../api/client";
 import SearchForm from "../components/SearchForm";
 import TravelCard from "../components/TravelCard";
 import { useAuth } from "../context/AuthContext";
@@ -8,35 +7,21 @@ import { searchTravels } from "../services/travelService";
 
 function SearchPage() {
   const location = useLocation();
-  const navigate = useNavigate();
+  const navigate  = useNavigate();
   const { isUser } = useAuth();
 
   const [travels, setTravels] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [modes, setModes] = useState([]);
+  const [error,   setError]   = useState("");
 
-  // Fetch travel modes for the SearchForm dropdown once
-  useEffect(() => {
-    apiClient
-      .get("/admin/form-options/vehicles")
-      .then((r) => setModes(r.data.modes || []))
-      .catch(() => {
-        // Fallback static list if backend unavailable
-        setModes([
-          { value: "Bus", label: "Bus" },
-          { value: "Train", label: "Train" },
-          { value: "Flight", label: "Flight" },
-        ]);
-      });
-  }, []);
-
+  // Parse URL params — origin/destination are now location_id numbers from dropdown
   const filters = useMemo(
     () => Object.fromEntries(new URLSearchParams(location.search).entries()),
     [location.search]
   );
 
   const hasSearch = useMemo(
-    () => Object.values(filters).some((v) => String(v || "").trim() !== ""),
+    () => Boolean(filters.type && filters.origin && filters.destination && filters.departureDate),
     [filters]
   );
 
@@ -46,9 +31,13 @@ function SearchPage() {
       return;
     }
     setLoading(true);
+    setError("");
     searchTravels(filters)
       .then(setTravels)
-      .catch(() => setTravels([]))
+      .catch(err => {
+        setTravels([]);
+        setError(err.message || "Search failed.");
+      })
       .finally(() => setLoading(false));
   }, [filters, hasSearch, isUser]);
 
@@ -66,32 +55,29 @@ function SearchPage() {
       <section className="section-heading">
         <div>
           <p className="eyebrow">Book Travel</p>
-          <h1>Book trips</h1>
+          <h1>Search and book trips</h1>
         </div>
       </section>
 
       <div className="panel">
-        <SearchForm
-          onSearch={handleSearch}
-          initialValues={filters}
-          compact
-          modes={modes}
-        />
+        <SearchForm onSearch={handleSearch} initialValues={filters} compact />
       </div>
 
-      {loading ? (
-        <div className="panel">Loading trips...</div>
-      ) : hasSearch ? (
+      {loading && <div className="panel">Searching for trips…</div>}
+
+      {error && <p className="error-text">{error}</p>}
+
+      {!loading && hasSearch && (
         <div className="card-grid">
           {travels.length ? (
-            travels.map((travel) => (
-              <TravelCard key={travel.id} travel={travel} />
-            ))
+            travels.map(travel => <TravelCard key={travel.id} travel={travel} />)
           ) : (
-            <div className="panel">No trips found for your search.</div>
+            <div className="panel">
+              No trips found for your search. Try a different date or route.
+            </div>
           )}
         </div>
-      ) : null}
+      )}
     </div>
   );
 }

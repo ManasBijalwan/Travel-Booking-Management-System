@@ -1,4 +1,9 @@
 const oracledb = require("oracledb");
+
+// ─── Mode selection ───────────────────────────────────────────────────────────
+// THIN (default): pure JS, no Oracle Instant Client required.
+// THICK: set USE_THICK_MODE=true in .env (also set ORACLE_CLIENT_LIB if needed).
+// For remote/non-XE databases: only change .env values — this file stays the same.
 if (process.env.USE_THICK_MODE === "true") {
   oracledb.initOracleClient({
     libDir: process.env.ORACLE_CLIENT_LIB || undefined,
@@ -15,16 +20,17 @@ let pool;
 
 async function initPool() {
   pool = await oracledb.createPool({
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
+    user:          process.env.DB_USER,
+    password:      process.env.DB_PASSWORD,
     connectString: process.env.DB_CONNECT_STRING,
-    poolMin: 2,
-    poolMax: 10,
+    poolMin:       2,
+    poolMax:       10,
     poolIncrement: 1,
   });
-  console.log(`Oracle pool ready → ${process.env.DB_CONNECT_STRING}`);
+  console.log(`Oracle pool ready → ${process.env.DB_CONNECT_STRING} as ${process.env.DB_USER}`);
 }
 
+/** Run a single SQL/PLSQL statement; connection is auto-released. */
 async function execute(sql, binds = {}, opts = {}) {
   let conn;
   try {
@@ -38,10 +44,15 @@ async function execute(sql, binds = {}, opts = {}) {
   }
 }
 
+/**
+ * Acquire a raw connection for multi-statement transactions.
+ * Caller must call conn.commit()/rollback() and conn.close().
+ */
 async function getConnection() {
   return pool.getConnection();
 }
 
+/** Drain all rows from a SYS_REFCURSOR OUT bind and close it. */
 async function fetchCursor(cursor) {
   const rows = [];
   let row;
